@@ -1,0 +1,20 @@
+{
+    "type": "package",
+    "name": "avh4/elm-github-v3",
+    "summary": "Unofficial GitHub v3 API for Elm",
+    "license": "MIT",
+    "version": "1.0.0",
+    "exposed-modules": [
+        "Github"
+    ],
+    "elm-version": "0.19.0 <= v < 0.20.0",
+    "dependencies": {
+        "elm/core": "1.0.0 <= v < 2.0.0",
+        "elm/http": "2.0.0 <= v < 3.0.0",
+        "elm/json": "1.1.3 <= v < 2.0.0",
+        "elm/time": "1.0.0 <= v < 2.0.0",
+        "rtfeldman/elm-iso8601-date-strings": "1.1.2 <= v < 2.0.0",
+        "truqu/elm-base64": "2.0.4 <= v < 3.0.0"
+    },
+    "test-dependencies": {}
+}

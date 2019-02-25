@@ -1,0 +1,20 @@
+{
+  "name": "elm-github-v3",
+  "version": "1.0.0",
+  "description": "",
+  "scripts": {
+    "build": "elm make",
+    "build-docs": "elm make --docs=documentation.json",
+    "test": "npm run-script build && npm run-script build-docs && npm run-script check",
+    "check": "elm-format --validate .",
+    "watch": "chokidar --initial elm.json 'src/**/*.elm' 'tests/**/*.elm' 'example/**/*.elm' -c 'npm test'"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "chokidar-cli": "^1.2.1",
+    "elm": "^0.19.0-bugfix6",
+    "elm-format": "^0.8.1"
+  }
+}
