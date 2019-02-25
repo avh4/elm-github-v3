@@ -503,8 +503,3 @@ jsonResolver decoder =
 
                 Http.BadStatus_ metadata _ ->
                     Err (Http.BadStatus metadata.statusCode)
-
-
-
--- curl https://api.github.com/repos/NoRedInk/start-app/git/trees --request POST --data '{"base_tree":"8330de04a1bde71c59b2689777492ee85e71bba7", "tree": [{"path": "Main.elm", "mode":"100644", "type":"blob","content": "foo : ()\nfoo = ()"}]}'  --header 'Authorization: token e3e643704b37c4c049f659dbfed3d2e2b4850367'
--- curl https://api.github.com/repos/NoRedInk/start-app/git/commits --request POST --data '{"message": "Create a test commit from the CLI", "tree":"b4d23eb7fdfa81f8fba3942313208410d781754a", "parents":["2232d9a512f022937464ad3d416360b07b44b615"]}'  --header 'Authorization: token e3e643704b37c4c049f659dbfed3d2e2b4850367'
