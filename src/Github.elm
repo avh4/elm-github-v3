@@ -40,7 +40,7 @@ getCommit :
     , sha : String
     }
     ->
-        Task String
+        Task Http.Error
             { sha : String
             , tree :
                 { sha : String
@@ -81,7 +81,7 @@ createCommit :
     , parents : List String
     }
     ->
-        Task String
+        Task Http.Error
             { sha : String
             }
 createCommit params =
@@ -118,7 +118,7 @@ getBranch :
     , branchName : String
     }
     ->
-        Task String
+        Task Http.Error
             { object :
                 { sha : String
                 }
@@ -150,7 +150,7 @@ createBranch :
     , branchName : String
     , sha : String
     }
-    -> Task String ()
+    -> Task Http.Error ()
 createBranch params =
     let
         decoder =
@@ -196,7 +196,7 @@ getPullRequests :
     { authToken : String
     , repo : String
     }
-    -> Task String (List PullRequest)
+    -> Task Http.Error (List PullRequest)
 getPullRequests params =
     Http.task
         { method = "GET"
@@ -219,7 +219,7 @@ getPullRequest :
     , number : Int
     }
     ->
-        Task String
+        Task Http.Error
             { head :
                 { ref : String
                 , sha : String
@@ -262,7 +262,7 @@ createPullRequest :
     , title : String
     , description : String
     }
-    -> Task String ()
+    -> Task Http.Error ()
 createPullRequest params =
     let
         decoder =
@@ -298,7 +298,7 @@ getFileContents :
     , path : String
     }
     ->
-        Task String
+        Task Http.Error
             { encoding : String
             , content : String
             , sha : String
@@ -342,7 +342,7 @@ updateFileContents :
     , content : String
     }
     ->
-        Task String
+        Task Http.Error
             { content :
                 { sha : String
                 }
@@ -385,7 +385,7 @@ getComments :
     , issueNumber : Int
     }
     ->
-        Task String
+        Task Http.Error
             (List
                 { body : String
                 , user :
@@ -438,7 +438,7 @@ createComment :
     , body : String
     }
     ->
-        Task String
+        Task Http.Error
             { body : String
             , user :
                 { login : String
@@ -482,7 +482,7 @@ createComment params =
         }
 
 
-jsonResolver : Json.Decode.Decoder a -> Http.Resolver String a
+jsonResolver : Json.Decode.Decoder a -> Http.Resolver Http.Error a
 jsonResolver decoder =
     Http.stringResolver <|
         \response ->
@@ -490,9 +490,19 @@ jsonResolver decoder =
                 Http.GoodStatus_ _ body ->
                     Json.Decode.decodeString decoder body
                         |> Result.mapError Json.Decode.errorToString
+                        |> Result.mapError Http.BadBody
 
-                _ ->
-                    Err (Debug.toString response)
+                Http.BadUrl_ message ->
+                    Err (Http.BadUrl message)
+
+                Http.Timeout_ ->
+                    Err Http.Timeout
+
+                Http.NetworkError_ ->
+                    Err Http.NetworkError
+
+                Http.BadStatus_ metadata _ ->
+                    Err (Http.BadStatus metadata.statusCode)
 
 
 
