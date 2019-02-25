@@ -4,4 +4,28 @@
 
 # elm-github-v3
 
-Unofficial GitHub v3 API for Elm
+This is an unofficial Elm wrapper for the [GitHub REST v3 API](https://developer.github.com/v3/).
+The implementation is currently very incomplete
+(I've only implemented the exact requests, input parameters, and output decode that I've needed),
+but I decided to publish this in case it can save others some work.
+Pull requests to make the implementation more complete are welcome.
+
+
+## Example usage
+
+```sh
+elm install avh4/elm-gihub-v3
+```
+
+```elm
+import Github
+
+getPullRequestTitles : Cmd (Result String (List String))
+getPullRequestTitles =
+    Github.getPullRequests
+        { authToken = "123..."
+        , repo = "avh4/elm-format"
+        }
+        |> Task.map .title
+        |> Task.attempt identity
+```
