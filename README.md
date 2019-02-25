@@ -26,6 +26,6 @@ getPullRequestTitles =
         { authToken = "123..."
         , repo = "avh4/elm-format"
         }
-        |> Task.map .title
+        |> Task.map (List.map .title)
         |> Task.attempt identity
 ```
