@@ -5,7 +5,7 @@
   "scripts": {
     "build": "elm make",
     "build-docs": "elm make --docs=documentation.json",
-    "test": "npm run-script build && npm run-script build-docs && npm run-script check",
+    "test": "npm run-script build && npm run-script build-docs && npm run-script check && elm diff",
     "check": "elm-format --validate .",
     "watch": "chokidar --initial elm.json 'src/**/*.elm' 'tests/**/*.elm' 'example/**/*.elm' -c 'npm test'"
   },
