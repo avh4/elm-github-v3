@@ -14,7 +14,7 @@ Pull requests to make the implementation more complete are welcome.
 ## Example usage
 
 ```sh
-elm install avh4/elm-gihub-v3
+elm install avh4/elm-github-v3
 ```
 
 ```elm
