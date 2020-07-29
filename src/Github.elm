@@ -561,7 +561,7 @@ createBlob params =
             [ Http.header "Authorization" ("token " ++ params.authToken)
             , Http.header "Accept" "application/vnd.github.v3+json"
             ]
-        , url = Debug.log "URL" <| "https://api.github.com/repos/" ++ params.owner ++ "/" ++ params.repo ++ "/git/blobs"
+        , url = "https://api.github.com/repos/" ++ params.owner ++ "/" ++ params.repo ++ "/git/blobs"
         , body =
             Http.jsonBody
                 (Json.Encode.object
