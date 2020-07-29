@@ -3,6 +3,7 @@ module Github exposing
     , getCommit, createCommit
     , PullRequest, getPullRequests, getPullRequest, createPullRequest
     , getFileContents, updateFileContents
+    , createBlob, getBlob
     , getComments, createComment
     )
 
@@ -12,6 +13,7 @@ module Github exposing
 @docs getCommit, createCommit
 @docs PullRequest, getPullRequests, getPullRequest, createPullRequest
 @docs getFileContents, updateFileContents
+@docs createBlob, getBlob
 
 
 ## Issues
@@ -503,3 +505,70 @@ jsonResolver decoder =
 
                 Http.BadStatus_ metadata _ ->
                     Err (Http.BadStatus metadata.statusCode)
+
+
+
+-- Added by JC --
+
+
+{-| Return a blob with given {sha} from {owner}{repo} as a base64-encoded string.
+-}
+getBlob :
+    { owner : String
+    , repo : String
+    , sha : String
+    }
+    -> Task Http.Error String
+getBlob params =
+    let
+        decoder =
+            Json.Decode.at [ "content" ] Json.Decode.string
+    in
+    Http.task
+        { method = "GET"
+        , headers =
+            [ Http.header "Accept" "application/vnd.github.v3+json"
+            ]
+        , url = "https://api.github.com/repos/" ++ params.owner ++ "/" ++ params.repo ++ "/git/blobs" ++ "/" ++ params.sha
+        , body = Http.emptyBody
+        , resolver = jsonResolver decoder
+        , timeout = Nothing
+        }
+
+
+{-| Create a blob in {owner}/{repo} with the given {content} using the
+{authToken}
+-}
+createBlob :
+    { authToken : String
+    , owner : String
+    , repo : String
+    , content : String
+    }
+    ->
+        Task Http.Error
+            { sha : String
+            }
+createBlob params =
+    let
+        decoder =
+            Json.Decode.at [ "sha" ] Json.Decode.string
+                |> Json.Decode.map (\sha -> { sha = sha })
+    in
+    Http.task
+        { method = "POST"
+        , headers =
+            [ Http.header "Authorization" ("token " ++ params.authToken)
+            , Http.header "Accept" "application/vnd.github.v3+json"
+            ]
+        , url = Debug.log "URL" <| "https://api.github.com/repos/" ++ params.owner ++ "/" ++ params.repo ++ "/git/blobs"
+        , body =
+            Http.jsonBody
+                (Json.Encode.object
+                    [ ( "content", Json.Encode.string params.content )
+                    , ( "encoding", Json.Encode.string "utf-8" )
+                    ]
+                )
+        , resolver = jsonResolver decoder
+        , timeout = Nothing
+        }
