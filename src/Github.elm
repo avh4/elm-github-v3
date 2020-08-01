@@ -5,6 +5,7 @@ module Github exposing
     , getFileContents, updateFileContents
     , createBlob, getBlob
     , getComments, createComment
+    , UpdateAndCommitParams, updateAndCommit
     )
 
 {-|
@@ -19,6 +20,11 @@ module Github exposing
 ## Issues
 
 @docs getComments, createComment
+
+
+## Update and commit file
+
+@docs UpdateAndCommitParams, updateAndCommit
 
 -}
 
@@ -74,9 +80,12 @@ getCommit params =
 
 NOTE: Not all input options and output fields are supported yet. Pull requests adding more complete support are welcome.
 
+NOTE: field added: owner (JC)
+
 -}
 createCommit :
     { authToken : String
+    , owner : String
     , repo : String
     , message : String
     , tree : String
@@ -95,7 +104,7 @@ createCommit params =
     Http.task
         { method = "POST"
         , headers = [ Http.header "Authorization" ("token " ++ params.authToken) ]
-        , url = "https://api.github.com/repos/" ++ params.repo ++ "/git/commits"
+        , url = "https://api.github.com/repos/" ++ params.owner ++ "/" ++ params.repo ++ "/git/commits"
         , body =
             Http.jsonBody
                 (Json.Encode.object
@@ -333,9 +342,12 @@ getFileContents params =
 
 NOTE: Not all input options and output fields are supported yet. Pull requests adding more complete support are welcome.
 
+NOTE: field added: owner (JC)
+
 -}
 updateFileContents :
     { authToken : String
+    , owner : String
     , repo : String
     , branch : String
     , path : String
@@ -361,13 +373,15 @@ updateFileContents params =
     Http.task
         { method = "PUT"
         , headers = [ Http.header "Authorization" ("token " ++ params.authToken) ]
-        , url = "https://api.github.com/repos/" ++ params.repo ++ "/contents/" ++ params.path
+        , url = "https://api.github.com/repos/" ++ params.owner ++ "/" ++ params.repo ++ "/contents/" ++ params.path
         , body =
             Http.jsonBody
                 (Json.Encode.object
                     [ ( "message", Json.Encode.string params.message )
+                    , ( "path", Json.Encode.string params.path )
                     , ( "content", Json.Encode.string (Base64.encode params.content) )
-                    , ( "sha", Json.Encode.string params.sha )
+
+                    --, ( "sha", Json.Encode.string params.sha )
                     , ( "branch", Json.Encode.string params.branch )
                     ]
                 )
@@ -567,6 +581,318 @@ createBlob params =
                 (Json.Encode.object
                     [ ( "content", Json.Encode.string params.content )
                     , ( "encoding", Json.Encode.string "utf-8" )
+                    ]
+                )
+        , resolver = jsonResolver decoder
+        , timeout = Nothing
+        }
+
+
+
+-- NEW STUFF
+
+
+{-| Helper function for updateAndCommit
+-}
+getUrl :
+    { a
+        | url : String
+    }
+    ->
+        Task Http.Error
+            { sha : String
+            }
+getUrl params =
+    let
+        decoder =
+            Json.Decode.map
+                (\sha ->
+                    { sha = sha
+                    }
+                )
+                (Json.Decode.at [ "sha" ] Json.Decode.string)
+    in
+    Http.task
+        { method = "GET"
+        , headers = []
+        , url = params.url
+        , body = Http.emptyBody
+        , resolver = jsonResolver decoder
+        , timeout = Nothing
+        }
+
+
+{-| Used internally by updateAndCommit to transmit
+information down the task pipeline.
+-}
+type alias UpdateAndCommitRecord =
+    { authToken : String
+    , owner : String
+    , repo : String
+    , branch : String
+    , content : String
+    , fileSha : String
+    , fileName : String
+    , message : String
+    , headSha : String
+    , headUrl : String
+    , commitSha : String
+    , treeSha : String
+    , treeUrl : String
+    , newTreeSha : String
+    , newCommitSha : String
+    , updatedRefSha : String
+    }
+
+
+{-| Initial state for the information transmitted down the task pipeline
+-}
+initialUpdateAndCommitRecord : UpdateAndCommitRecord
+initialUpdateAndCommitRecord =
+    { authToken = ""
+    , owner = ""
+    , repo = ""
+    , branch = "master"
+    , content = ""
+    , fileSha = ""
+    , fileName = ""
+    , message = ""
+    , headSha = ""
+    , headUrl = ""
+    , commitSha = ""
+    , treeSha = ""
+    , treeUrl = ""
+    , newTreeSha = ""
+    , newCommitSha = ""
+    , updatedRefSha = ""
+    }
+
+
+{-| The information needed to update a file and commit it on Github
+-}
+type alias UpdateAndCommitParams =
+    { authToken : String
+    , owner : String
+    , repo : String
+    , fileName : String
+    , content : String
+    , message : String
+    }
+
+
+{-| Use the UpdateAndCommitParams to commit an update to an existing file.
+
+You can view the latest version of the file committed this way:
+
+        https://github.com/:owner/:repo/blob/master/:filename
+
+The segment :filename should be understood as :path.
+
+-}
+updateAndCommit : UpdateAndCommitParams -> Task Http.Error { sha : String }
+updateAndCommit updateAndCommitParams =
+    let
+        params =
+            { initialUpdateAndCommitRecord
+                | authToken = updateAndCommitParams.authToken
+                , owner = updateAndCommitParams.owner
+                , repo = updateAndCommitParams.repo
+                , fileName = updateAndCommitParams.fileName
+                , content = updateAndCommitParams.content
+                , message = updateAndCommitParams.message
+            }
+    in
+    createBlob { authToken = params.authToken, owner = params.owner, repo = params.repo, content = params.content }
+        |> Task.andThen
+            (\data ->
+                getHeadRef { owner = params.owner, repo = params.repo, branch = params.branch }
+                    |> Task.map (\x -> { params | fileSha = data.sha, headSha = x.sha, headUrl = x.url })
+            )
+        |> Task.andThen
+            (\output ->
+                getCommitInfo { owner = params.owner, repo = params.repo, sha = output.headSha }
+                    |> Task.map (\x -> { output | treeUrl = x.tree_url, commitSha = x.commit_sha, treeSha = x.tree_sha })
+            )
+        |> Task.andThen
+            (\output ->
+                getUrl { url = output.treeUrl }
+                    |> Task.map (\x -> { output | newTreeSha = x.sha })
+            )
+        |> Task.andThen
+            (\output ->
+                createTree
+                    { authToken = params.authToken
+                    , owner = params.owner
+                    , repo = params.repo
+                    , tree_sha = output.treeSha
+                    , file_sha = output.fileSha
+                    , path = params.fileName
+                    }
+                    |> Task.map (\x -> { output | newTreeSha = x.sha })
+            )
+        |> Task.andThen
+            (\output ->
+                createCommit
+                    { authToken = params.authToken
+                    , owner = params.owner
+                    , repo = params.repo
+                    , message = params.message
+                    , tree = output.newTreeSha
+                    , parents = [ output.headSha ]
+                    }
+                    |> Task.map (\x -> { output | newCommitSha = x.sha })
+            )
+        |> Task.andThen
+            (\output ->
+                updateRef
+                    { authToken = params.authToken
+                    , owner = params.owner
+                    , repo = params.repo
+                    , branch = params.branch
+                    , force = True
+                    , sha = output.newCommitSha
+                    }
+            )
+
+
+
+-- AUXILIARY FUNCTIONS
+
+
+getHeadRef :
+    { a
+        | owner : String
+        , repo : String
+        , branch : String
+    }
+    ->
+        Task Http.Error
+            { sha : String
+            , url : String
+            }
+getHeadRef params =
+    let
+        decoder =
+            Json.Decode.map2
+                (\sha url ->
+                    { sha = sha
+                    , url = url
+                    }
+                )
+                (Json.Decode.at [ "object", "sha" ] Json.Decode.string)
+                (Json.Decode.at [ "object", "url" ] Json.Decode.string)
+    in
+    Http.task
+        { method = "GET"
+        , headers = []
+        , url = "https://api.github.com/repos/" ++ params.owner ++ "/" ++ params.repo ++ "/git/refs/heads/" ++ params.branch
+        , body = Http.emptyBody
+        , resolver = jsonResolver decoder
+        , timeout = Nothing
+        }
+
+
+getCommitInfo :
+    { a
+        | owner : String
+        , repo : String
+        , sha : String
+    }
+    ->
+        Task Http.Error
+            { tree_sha : String
+            , tree_url : String
+            , commit_sha : String
+            }
+getCommitInfo params =
+    let
+        decoder =
+            Json.Decode.map3
+                (\tree_sha tree_url commit_sha ->
+                    { tree_sha = tree_sha
+                    , tree_url = tree_url
+                    , commit_sha = commit_sha
+                    }
+                )
+                (Json.Decode.at [ "tree", "sha" ] Json.Decode.string)
+                (Json.Decode.at [ "tree", "url" ] Json.Decode.string)
+                (Json.Decode.at [ "sha" ] Json.Decode.string)
+    in
+    Http.task
+        { method = "GET"
+        , headers = []
+        , url = "https://api.github.com/repos/" ++ params.owner ++ "/" ++ params.repo ++ "/git/commits/" ++ params.sha
+        , body = Http.emptyBody
+        , resolver = jsonResolver decoder
+        , timeout = Nothing
+        }
+
+
+createTree :
+    { authToken : String
+    , owner : String
+    , repo : String
+    , tree_sha : String
+    , file_sha : String
+    , path : String
+    }
+    -> Task Http.Error { sha : String }
+createTree params =
+    let
+        encodeInner p =
+            Json.Encode.object
+                [ ( "path", Json.Encode.string p.path )
+                , ( "mode", Json.Encode.string "100644" )
+                , ( "type", Json.Encode.string "blob" )
+                , ( "sha", Json.Encode.string p.file_sha )
+                ]
+
+        decoder =
+            Json.Decode.map
+                (\sha_ -> { sha = sha_ })
+                (Json.Decode.at [ "sha" ] Json.Decode.string)
+    in
+    Http.task
+        { method = "POST"
+        , headers = [ Http.header "Authorization" ("token " ++ params.authToken) ]
+        , url = "https://api.github.com/repos/" ++ params.owner ++ "/" ++ params.repo ++ "/git/trees"
+        , body =
+            Http.jsonBody
+                (Json.Encode.object
+                    [ ( "base_tree", Json.Encode.string params.tree_sha )
+                    , ( "tree", Json.Encode.list encodeInner [ { path = params.path, file_sha = params.file_sha } ] )
+                    ]
+                )
+        , resolver = jsonResolver decoder
+        , timeout = Nothing
+        }
+
+
+updateRef :
+    { authToken : String
+    , owner : String
+    , repo : String
+    , branch : String
+    , force : Bool
+    , sha : String
+    }
+    -> Task Http.Error { sha : String }
+updateRef params =
+    let
+        decoder =
+            Json.Decode.map
+                (\sha_ -> { sha = sha_ })
+                (Json.Decode.at [ "object", "sha" ] Json.Decode.string)
+    in
+    Http.task
+        { method = "PATCH"
+        , headers = [ Http.header "Authorization" ("token " ++ params.authToken) ]
+        , url = "https://api.github.com/repos/" ++ params.owner ++ "/" ++ params.repo ++ "/git/refs/heads/master" -- ++ params.branch ++ "/HEAD"
+        , body =
+            Http.jsonBody
+                (Json.Encode.object
+                    [ ( "sha", Json.Encode.string params.sha )
+                    , ( "force", Json.Encode.bool params.force )
                     ]
                 )
         , resolver = jsonResolver decoder
