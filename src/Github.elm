@@ -2,7 +2,7 @@ module Github exposing
     ( getBranch, createBranch
     , getCommit, createCommit
     , PullRequest, getPullRequests, getPullRequest, createPullRequest
-    , getFileContents, updateFileContents
+    , getFileContents, getRawFileContentsCmd, updateFileContents
     , createBlob, getBlob
     , getComments, createComment
     , UpdateAndCommitParams, updateAndCommit
@@ -13,7 +13,7 @@ module Github exposing
 @docs getBranch, createBranch
 @docs getCommit, createCommit
 @docs PullRequest, getPullRequests, getPullRequest, createPullRequest
-@docs getFileContents, updateFileContents
+@docs getFileContents, getRawFileContentsCmd, updateFileContents
 @docs createBlob, getBlob
 
 
@@ -304,6 +304,7 @@ NOTE: Not all input options and output fields are supported yet. Pull requests a
 -}
 getFileContents :
     { authToken : String
+    , owner : String
     , repo : String
     , ref : String
     , path : String
@@ -331,10 +332,37 @@ getFileContents params =
     Http.task
         { method = "GET"
         , headers = [ Http.header "Authorization" ("token " ++ params.authToken) ]
-        , url = "https://api.github.com/repos/" ++ params.repo ++ "/contents/" ++ params.path ++ "?ref=" ++ params.ref
+        , url = "https://api.github.com/repos/" ++ params.owner ++ "/" ++ params.repo ++ "/contents/" ++ params.path ++ "?ref=" ++ params.ref
         , body = Http.emptyBody
         , resolver = jsonResolver decoder
         , timeout = Nothing
+        }
+
+
+{-| Get raw file contents. Note that the type signature is different from getFileContents.
+-}
+getRawFileContentsCmd :
+    { a
+        | authToken : String
+        , owner : String
+        , path : String
+        , ref : String
+        , repo : String
+    }
+    -> (Result Http.Error String -> msg)
+    -> Cmd msg
+getRawFileContentsCmd params msg_ =
+    Http.request
+        { method = "GET"
+        , headers =
+            [ Http.header "Authorization" ("token " ++ params.authToken)
+            , Http.header "Accept" "application/vnd.github.VERSION.raw"
+            ]
+        , url = "https://api.github.com/repos/" ++ params.owner ++ "/" ++ params.repo ++ "/contents/" ++ params.path ++ "?ref=" ++ params.ref
+        , body = Http.emptyBody
+        , expect = Http.expectString msg_
+        , timeout = Nothing
+        , tracker = Nothing
         }
 
 
