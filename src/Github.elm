@@ -518,11 +518,19 @@ getBlob :
     { repo : String
     , file_sha : String
     }
-    -> Task Http.Error String
+    ->
+        Task Http.Error
+            { content : String
+            }
 getBlob params =
     let
         decoder =
-            Json.Decode.at [ "content" ] Json.Decode.string
+            Json.Decode.map
+                (\content ->
+                    { content = content
+                    }
+                )
+                (Json.Decode.at [ "content" ] Json.Decode.string)
     in
     Http.task
         { method = "GET"
