@@ -516,7 +516,7 @@ NOTE: Not all output fields are supported yet. Pull requests adding more complet
 -}
 getBlobAsBase64 :
     { repo : String
-    , file_sha : String
+    , fileSha : String
     }
     ->
         Task Http.Error
@@ -537,7 +537,7 @@ getBlobAsBase64 params =
         , headers =
             [ Http.header "Accept" "application/vnd.github.v3+json"
             ]
-        , url = "https://api.github.com/repos/" ++ params.repo ++ "/git/blobs" ++ "/" ++ params.file_sha
+        , url = "https://api.github.com/repos/" ++ params.repo ++ "/git/blobs" ++ "/" ++ params.fileSha
         , body = Http.emptyBody
         , resolver = jsonResolver decoder
         , timeout = Nothing
