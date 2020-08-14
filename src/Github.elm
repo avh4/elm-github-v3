@@ -515,8 +515,7 @@ NOTE: Not all output fields are supported yet. Pull requests adding more complet
 
 -}
 getBlob :
-    { owner : String
-    , repo : String
+    { repo : String
     , sha : String
     }
     -> Task Http.Error String
@@ -530,7 +529,7 @@ getBlob params =
         , headers =
             [ Http.header "Accept" "application/vnd.github.v3+json"
             ]
-        , url = "https://api.github.com/repos/" ++ params.owner ++ "/" ++ params.repo ++ "/git/blobs" ++ "/" ++ params.sha
+        , url = "https://api.github.com/repos/" ++ params.repo ++ "/git/blobs" ++ "/" ++ params.sha
         , body = Http.emptyBody
         , resolver = jsonResolver decoder
         , timeout = Nothing
@@ -544,7 +543,6 @@ NOTE: Not all output fields are supported yet. Pull requests adding more complet
 -}
 createBlob :
     { authToken : String
-    , owner : String
     , repo : String
     , content : String
     }
@@ -564,7 +562,7 @@ createBlob params =
             [ Http.header "Authorization" ("token " ++ params.authToken)
             , Http.header "Accept" "application/vnd.github.v3+json"
             ]
-        , url = "https://api.github.com/repos/" ++ params.owner ++ "/" ++ params.repo ++ "/git/blobs"
+        , url = "https://api.github.com/repos/" ++ params.repo ++ "/git/blobs"
         , body =
             Http.jsonBody
                 (Json.Encode.object
