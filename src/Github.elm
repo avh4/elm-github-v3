@@ -3,7 +3,7 @@ module Github exposing
     , getCommit, createCommit
     , PullRequest, getPullRequests, getPullRequest, createPullRequest
     , getFileContents, updateFileContents
-    , createBlob, getBlob
+    , createBlob, getBlobAsBase64
     , getComments, createComment
     )
 
@@ -13,7 +13,7 @@ module Github exposing
 @docs getCommit, createCommit
 @docs PullRequest, getPullRequests, getPullRequest, createPullRequest
 @docs getFileContents, updateFileContents
-@docs createBlob, getBlob
+@docs createBlob, getBlobAsBase64
 
 
 ## Issues
@@ -514,7 +514,7 @@ This function returns the blob content as a base64-encoded string.
 NOTE: Not all output fields are supported yet. Pull requests adding more complete support are welcome.
 
 -}
-getBlob :
+getBlobAsBase64 :
     { repo : String
     , file_sha : String
     }
@@ -522,7 +522,7 @@ getBlob :
         Task Http.Error
             { content : String
             }
-getBlob params =
+getBlobAsBase64 params =
     let
         decoder =
             Json.Decode.map

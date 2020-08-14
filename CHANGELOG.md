@@ -1,4 +1,4 @@
   # main
   
-  - Added getBlob and createBlob
+  - Added getBlobAsBase64 and createBlob
   
