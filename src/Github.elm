@@ -516,7 +516,7 @@ NOTE: Not all output fields are supported yet. Pull requests adding more complet
 -}
 getBlob :
     { repo : String
-    , sha : String
+    , file_sha : String
     }
     -> Task Http.Error String
 getBlob params =
@@ -529,7 +529,7 @@ getBlob params =
         , headers =
             [ Http.header "Accept" "application/vnd.github.v3+json"
             ]
-        , url = "https://api.github.com/repos/" ++ params.repo ++ "/git/blobs" ++ "/" ++ params.sha
+        , url = "https://api.github.com/repos/" ++ params.repo ++ "/git/blobs" ++ "/" ++ params.file_sha
         , body = Http.emptyBody
         , resolver = jsonResolver decoder
         , timeout = Nothing
