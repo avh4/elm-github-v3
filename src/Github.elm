@@ -507,11 +507,12 @@ jsonResolver decoder =
                     Err (Http.BadStatus metadata.statusCode)
 
 
+{-| See <https://docs.github.com/en/rest/reference/git#get-a-blob>
 
--- Added by JC --
+This function returns the blob content as a base64-encoded string.
 
+NOTE: Not all output fields are supported yet. Pull requests adding more complete support are welcome.
 
-{-| Return a blob with given {sha} from {owner}{repo} as a base64-encoded string.
 -}
 getBlob :
     { owner : String
@@ -536,8 +537,10 @@ getBlob params =
         }
 
 
-{-| Create a blob in {owner}/{repo} with the given {content} using the
-{authToken}
+{-| See <https://docs.github.com/en/rest/reference/git#create-a-blob>
+
+NOTE: Not all output fields are supported yet. Pull requests adding more complete support are welcome.
+
 -}
 createBlob :
     { authToken : String
