@@ -1,32 +1,47 @@
 module Github exposing
     ( getBranch, createBranch
-    , getCommit, createCommit
-    , PullRequest, getPullRequests, getPullRequest, createPullRequest
     , getFileContents, updateFileContents
-    , createBlob, getBlobAsBase64
     , getComments, createComment
-    , UpdateAndCommitParams, updateAndCommit
+    , PullRequest, getPullRequests, getPullRequest, createPullRequest
+    , createBlob, getBlobAsBase64
+    , createCommit, getCommit
+    , getRef, Ref, getHeadRef, getTagRef, updateRef, updateHeadRef, updateTagRef
     , createBlobTree
     , FileMode(..)
     )
 
 {-|
 
+
+## Repositories
+
+See the official GitHub docs: <https://docs.github.com/en/rest/reference/repos>
+
 @docs getBranch, createBranch
-@docs getCommit, createCommit
-@docs PullRequest, getPullRequests, getPullRequest, createPullRequest
 @docs getFileContents, updateFileContents
-@docs createBlob, getBlobAsBase64
 
 
 ## Issues
 
+See the official GitHub docs: <https://docs.github.com/en/rest/reference/issues>
+
 @docs getComments, createComment
 
 
-## Update and commit file
+## Pulls (pull requests)
 
-@docs UpdateAndCommitParams, updateAndCommit
+See the official GitHub docs: <https://docs.github.com/en/rest/reference/pulls>
+
+@docs PullRequest, getPullRequests, getPullRequest, createPullRequest
+
+
+## Git database (low-level API)
+
+See the official GitHub docs: <https://docs.github.com/en/rest/reference/git>
+
+@docs createBlob, getBlobAsBase64
+@docs createCommit, getCommit
+@docs getRef, Ref, getHeadRef, getTagRef, updateRef, updateHeadRef, updateTagRef
 @docs createBlobTree
 @docs FileMode
 
