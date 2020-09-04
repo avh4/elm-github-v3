@@ -6,6 +6,8 @@ module Github exposing
     , createBlob, getBlobAsBase64
     , getComments, createComment
     , UpdateAndCommitParams, updateAndCommit
+    , createBlobTree
+    , FileMode(..)
     )
 
 {-|
@@ -25,6 +27,8 @@ module Github exposing
 ## Update and commit file
 
 @docs UpdateAndCommitParams, updateAndCommit
+@docs createBlobTree
+@docs FileMode
 
 -}
 
@@ -674,23 +678,59 @@ getTagRef params =
         }
 
 
-createTree :
+{-| The file mode; one of 100644 for file (blob), 100755 for executable (blob), 040000 for subdirectory (tree), 160000 for submodule (commit), or 120000 for a blob that specifies the path of a symlink.
+-}
+type FileMode
+    = File
+    | Executable
+    | Subdirectory
+    | Submodule
+    | Symlink
+
+
+modeToString : FileMode -> String
+modeToString mode =
+    case mode of
+        File ->
+            "100644"
+
+        Executable ->
+            "100755"
+
+        Subdirectory ->
+            "040000"
+
+        Submodule ->
+            "160000"
+
+        Symlink ->
+            "120000"
+
+
+{-| See <https://docs.github.com/en/rest/reference/git#create-a-tree>
+
+NOTE: Not all input options and output fields are supported yet. Pull requests adding more complete support are welcome.
+
+-}
+createBlobTree :
     { authToken : String
-    , owner : String
     , repo : String
-    , tree_sha : String
-    , file_sha : String
-    , path : String
+    , baseTree : String
+    , tree :
+        { path : String
+        , sha : String
+        , mode : FileMode
+        }
     }
     -> Task Http.Error { sha : String }
-createTree params =
+createBlobTree params =
     let
-        encodeInner p =
+        encodeTree tree =
             Json.Encode.object
-                [ ( "path", Json.Encode.string p.path )
-                , ( "mode", Json.Encode.string "100644" )
+                [ ( "path", Json.Encode.string tree.path )
+                , ( "mode", Json.Encode.string (modeToString tree.mode) )
                 , ( "type", Json.Encode.string "blob" )
-                , ( "sha", Json.Encode.string p.file_sha )
+                , ( "sha", Json.Encode.string tree.sha )
                 ]
 
         decoder =
@@ -700,13 +740,19 @@ createTree params =
     in
     Http.task
         { method = "POST"
-        , headers = [ Http.header "Authorization" ("token " ++ params.authToken) ]
-        , url = "https://api.github.com/repos/" ++ params.owner ++ "/" ++ params.repo ++ "/git/trees"
+        , headers =
+            [ Http.header "Authorization" ("token " ++ params.authToken)
+            ]
+        , url = "https://api.github.com/repos/" ++ params.repo ++ "/git/trees"
         , body =
             Http.jsonBody
                 (Json.Encode.object
-                    [ ( "base_tree", Json.Encode.string params.tree_sha )
-                    , ( "tree", Json.Encode.list encodeInner [ { path = params.path, file_sha = params.file_sha } ] )
+                    [ ( "base_tree", Json.Encode.string params.baseTree )
+                    , ( "tree"
+                      , Json.Encode.list encodeTree
+                            [ params.tree
+                            ]
+                      )
                     ]
                 )
         , resolver = jsonResolver decoder
