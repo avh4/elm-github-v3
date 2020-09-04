@@ -4,3 +4,4 @@
   - Added `getRef`, `getHeadRef`, `getTagRef`
   - Added `tree.url` field to `getCommit`
   - Added `createBlobTree`
+  - Added `updateRef`, `updateHeadRef`, `updateTagRef`

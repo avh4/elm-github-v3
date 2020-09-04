@@ -606,14 +606,28 @@ createBlob params =
         }
 
 
-{-| See [`getRef`](#getRef)
+{-| See [`getRef`](#getRef), [`updateRef`](#updateRef).
 -}
-type alias GetRefResponse =
+type alias Ref =
     { object :
         { sha : String
         , url : String
         }
     }
+
+
+decodeRef : Json.Decode.Decoder Ref
+decodeRef =
+    Json.Decode.map2
+        (\sha url ->
+            { object =
+                { sha = sha
+                , url = url
+                }
+            }
+        )
+        (Json.Decode.at [ "object", "sha" ] Json.Decode.string)
+        (Json.Decode.at [ "object", "url" ] Json.Decode.string)
 
 
 {-| See <https://docs.github.com/en/rest/reference/git#get-a-reference>
@@ -625,27 +639,14 @@ getRef :
     { repo : String
     , ref : String
     }
-    -> Task Http.Error GetRefResponse
+    -> Task Http.Error Ref
 getRef params =
-    let
-        decoder =
-            Json.Decode.map2
-                (\sha url ->
-                    { object =
-                        { sha = sha
-                        , url = url
-                        }
-                    }
-                )
-                (Json.Decode.at [ "object", "sha" ] Json.Decode.string)
-                (Json.Decode.at [ "object", "url" ] Json.Decode.string)
-    in
     Http.task
         { method = "GET"
         , headers = []
         , url = "https://api.github.com/repos/" ++ params.repo ++ "/git/refs/" ++ params.ref
         , body = Http.emptyBody
-        , resolver = jsonResolver decoder
+        , resolver = jsonResolver decodeRef
         , timeout = Nothing
         }
 
@@ -656,7 +657,7 @@ getHeadRef :
     { repo : String
     , branch : String
     }
-    -> Task Http.Error GetRefResponse
+    -> Task Http.Error Ref
 getHeadRef params =
     getRef
         { repo = params.repo
@@ -670,7 +671,7 @@ getTagRef :
     { repo : String
     , tag : String
     }
-    -> Task Http.Error GetRefResponse
+    -> Task Http.Error Ref
 getTagRef params =
     getRef
         { repo = params.repo
@@ -760,26 +761,24 @@ createBlobTree params =
         }
 
 
+{-| See <https://docs.github.com/en/rest/reference/git#update-a-reference>
+
+NOTE: Not all output fields are supported yet. Pull requests adding more complete support are welcome.
+
+-}
 updateRef :
     { authToken : String
-    , owner : String
     , repo : String
-    , branch : String
-    , force : Bool
+    , ref : String
     , sha : String
+    , force : Bool
     }
-    -> Task Http.Error { sha : String }
+    -> Task Http.Error Ref
 updateRef params =
-    let
-        decoder =
-            Json.Decode.map
-                (\sha_ -> { sha = sha_ })
-                (Json.Decode.at [ "object", "sha" ] Json.Decode.string)
-    in
     Http.task
         { method = "PATCH"
         , headers = [ Http.header "Authorization" ("token " ++ params.authToken) ]
-        , url = "https://api.github.com/repos/" ++ params.owner ++ "/" ++ params.repo ++ "/git/refs/heads/master" -- ++ params.branch ++ "/HEAD"
+        , url = "https://api.github.com/repos/" ++ params.repo ++ "/git/refs/" ++ params.ref
         , body =
             Http.jsonBody
                 (Json.Encode.object
@@ -787,6 +786,46 @@ updateRef params =
                     , ( "force", Json.Encode.bool params.force )
                     ]
                 )
-        , resolver = jsonResolver decoder
+        , resolver = jsonResolver decodeRef
         , timeout = Nothing
+        }
+
+
+{-| A convenience function for calling [`updateRef`](#updateRef) with the ref `heads/{branch}`
+-}
+updateHeadRef :
+    { authToken : String
+    , repo : String
+    , branch : String
+    , sha : String
+    , force : Bool
+    }
+    -> Task Http.Error Ref
+updateHeadRef params =
+    updateRef
+        { authToken = params.authToken
+        , repo = params.repo
+        , ref = "heads/" ++ params.branch
+        , sha = params.sha
+        , force = params.force
+        }
+
+
+{-| A convenience function for calling [`updateRef`](#updateRef) with the ref `tags/{tag}`
+-}
+updateTagRef :
+    { authToken : String
+    , repo : String
+    , tag : String
+    , sha : String
+    , force : Bool
+    }
+    -> Task Http.Error Ref
+updateTagRef params =
+    updateRef
+        { authToken = params.authToken
+        , repo = params.repo
+        , ref = "tags/" ++ params.tag
+        , sha = params.sha
+        , force = params.force
         }
