@@ -109,7 +109,6 @@ NOTE: field added: owner (JC)
 -}
 createCommit :
     { authToken : String
-    , owner : String
     , repo : String
     , message : String
     , tree : String
@@ -128,7 +127,7 @@ createCommit params =
     Http.task
         { method = "POST"
         , headers = [ Http.header "Authorization" ("token " ++ params.authToken) ]
-        , url = "https://api.github.com/repos/" ++ params.owner ++ "/" ++ params.repo ++ "/git/commits"
+        , url = "https://api.github.com/repos/" ++ params.repo ++ "/git/commits"
         , body =
             Http.jsonBody
                 (Json.Encode.object
@@ -371,7 +370,6 @@ NOTE: field added: owner (JC)
 -}
 updateFileContents :
     { authToken : String
-    , owner : String
     , repo : String
     , branch : String
     , path : String
@@ -397,7 +395,7 @@ updateFileContents params =
     Http.task
         { method = "PUT"
         , headers = [ Http.header "Authorization" ("token " ++ params.authToken) ]
-        , url = "https://api.github.com/repos/" ++ params.owner ++ "/" ++ params.repo ++ "/contents/" ++ params.path
+        , url = "https://api.github.com/repos/" ++ params.repo ++ "/contents/" ++ params.path
         , body =
             Http.jsonBody
                 (Json.Encode.object
