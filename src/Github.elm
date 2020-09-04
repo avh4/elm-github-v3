@@ -1,24 +1,49 @@
 module Github exposing
     ( getBranch, createBranch
-    , getCommit, createCommit
-    , PullRequest, getPullRequests, getPullRequest, createPullRequest
     , getFileContents, updateFileContents
-    , createBlob, getBlobAsBase64
     , getComments, createComment
+    , PullRequest, getPullRequests, getPullRequest, createPullRequest
+    , createBlob, getBlobAsBase64
+    , createCommit, getCommit
+    , getRef, Ref, getHeadRef, getTagRef, updateRef, updateHeadRef, updateTagRef
+    , createBlobTree
+    , FileMode(..)
     )
 
 {-|
 
+
+## Repositories
+
+See the official GitHub docs: <https://docs.github.com/en/rest/reference/repos>
+
 @docs getBranch, createBranch
-@docs getCommit, createCommit
-@docs PullRequest, getPullRequests, getPullRequest, createPullRequest
 @docs getFileContents, updateFileContents
-@docs createBlob, getBlobAsBase64
 
 
 ## Issues
 
+See the official GitHub docs: <https://docs.github.com/en/rest/reference/issues>
+
 @docs getComments, createComment
+
+
+## Pulls (pull requests)
+
+See the official GitHub docs: <https://docs.github.com/en/rest/reference/pulls>
+
+@docs PullRequest, getPullRequests, getPullRequest, createPullRequest
+
+
+## Git database (low-level API)
+
+See the official GitHub docs: <https://docs.github.com/en/rest/reference/git>
+
+@docs createBlob, getBlobAsBase64
+@docs createCommit, getCommit
+@docs getRef, Ref, getHeadRef, getTagRef, updateRef, updateHeadRef, updateTagRef
+@docs createBlobTree
+@docs FileMode
 
 -}
 
@@ -31,7 +56,7 @@ import Task exposing (Task)
 import Time
 
 
-{-| See <https://developer.github.com/v3/git/commits/#get-a-commit>
+{-| See <https://docs.github.com/en/rest/reference/git#get-a-commit>
 
 NOTE: Not all input options and output fields are supported yet. Pull requests adding more complete support are welcome.
 
@@ -46,19 +71,24 @@ getCommit :
             { sha : String
             , tree :
                 { sha : String
+                , url : String
                 }
             }
 getCommit params =
     let
         decoder =
-            Json.Decode.map2
-                (\sha treeSha ->
+            Json.Decode.map3
+                (\sha treeSha treeUrl ->
                     { sha = sha
-                    , tree = { sha = treeSha }
+                    , tree =
+                        { sha = treeSha
+                        , url = treeUrl
+                        }
                     }
                 )
                 (Json.Decode.at [ "sha" ] Json.Decode.string)
                 (Json.Decode.at [ "tree", "sha" ] Json.Decode.string)
+                (Json.Decode.at [ "tree", "url" ] Json.Decode.string)
     in
     Http.task
         { method = "GET"
@@ -73,6 +103,8 @@ getCommit params =
 {-| See <https://developer.github.com/v3/git/commits/#create-a-commit>
 
 NOTE: Not all input options and output fields are supported yet. Pull requests adding more complete support are welcome.
+
+NOTE: field added: owner (JC)
 
 -}
 createCommit :
@@ -333,6 +365,8 @@ getFileContents params =
 
 NOTE: Not all input options and output fields are supported yet. Pull requests adding more complete support are welcome.
 
+NOTE: field added: owner (JC)
+
 -}
 updateFileContents :
     { authToken : String
@@ -366,8 +400,10 @@ updateFileContents params =
             Http.jsonBody
                 (Json.Encode.object
                     [ ( "message", Json.Encode.string params.message )
+                    , ( "path", Json.Encode.string params.path )
                     , ( "content", Json.Encode.string (Base64.encode params.content) )
-                    , ( "sha", Json.Encode.string params.sha )
+
+                    --, ( "sha", Json.Encode.string params.sha )
                     , ( "branch", Json.Encode.string params.branch )
                     ]
                 )
@@ -580,4 +616,229 @@ createBlob params =
                 )
         , resolver = jsonResolver decoder
         , timeout = Nothing
+        }
+
+
+{-| See [`getRef`](#getRef), [`updateRef`](#updateRef).
+-}
+type alias Ref =
+    { object :
+        { sha : String
+        , url : String
+        }
+    }
+
+
+decodeRef : Json.Decode.Decoder Ref
+decodeRef =
+    Json.Decode.map2
+        (\sha url ->
+            { object =
+                { sha = sha
+                , url = url
+                }
+            }
+        )
+        (Json.Decode.at [ "object", "sha" ] Json.Decode.string)
+        (Json.Decode.at [ "object", "url" ] Json.Decode.string)
+
+
+{-| See <https://docs.github.com/en/rest/reference/git#get-a-reference>
+
+NOTE: Not all output fields are supported yet. Pull requests adding more complete support are welcome.
+
+-}
+getRef :
+    { repo : String
+    , ref : String
+    }
+    -> Task Http.Error Ref
+getRef params =
+    Http.task
+        { method = "GET"
+        , headers = []
+        , url = "https://api.github.com/repos/" ++ params.repo ++ "/git/refs/" ++ params.ref
+        , body = Http.emptyBody
+        , resolver = jsonResolver decodeRef
+        , timeout = Nothing
+        }
+
+
+{-| A convenience function for calling [`getRef`](#getRef) with the ref `heads/{branch}`
+-}
+getHeadRef :
+    { repo : String
+    , branch : String
+    }
+    -> Task Http.Error Ref
+getHeadRef params =
+    getRef
+        { repo = params.repo
+        , ref = "heads/" ++ params.branch
+        }
+
+
+{-| A convenience function for calling [`getRef`](#getRef) with the ref `tags/{tag}`
+-}
+getTagRef :
+    { repo : String
+    , tag : String
+    }
+    -> Task Http.Error Ref
+getTagRef params =
+    getRef
+        { repo = params.repo
+        , ref = "tags/" ++ params.tag
+        }
+
+
+{-| The file mode; one of 100644 for file (blob), 100755 for executable (blob), 040000 for subdirectory (tree), 160000 for submodule (commit), or 120000 for a blob that specifies the path of a symlink.
+-}
+type FileMode
+    = File
+    | Executable
+    | Subdirectory
+    | Submodule
+    | Symlink
+
+
+modeToString : FileMode -> String
+modeToString mode =
+    case mode of
+        File ->
+            "100644"
+
+        Executable ->
+            "100755"
+
+        Subdirectory ->
+            "040000"
+
+        Submodule ->
+            "160000"
+
+        Symlink ->
+            "120000"
+
+
+{-| See <https://docs.github.com/en/rest/reference/git#create-a-tree>
+
+NOTE: Not all input options and output fields are supported yet. Pull requests adding more complete support are welcome.
+
+-}
+createBlobTree :
+    { authToken : String
+    , repo : String
+    , baseTree : String
+    , tree :
+        { path : String
+        , sha : String
+        , mode : FileMode
+        }
+    }
+    -> Task Http.Error { sha : String }
+createBlobTree params =
+    let
+        encodeTree tree =
+            Json.Encode.object
+                [ ( "path", Json.Encode.string tree.path )
+                , ( "mode", Json.Encode.string (modeToString tree.mode) )
+                , ( "type", Json.Encode.string "blob" )
+                , ( "sha", Json.Encode.string tree.sha )
+                ]
+
+        decoder =
+            Json.Decode.map
+                (\sha_ -> { sha = sha_ })
+                (Json.Decode.at [ "sha" ] Json.Decode.string)
+    in
+    Http.task
+        { method = "POST"
+        , headers =
+            [ Http.header "Authorization" ("token " ++ params.authToken)
+            ]
+        , url = "https://api.github.com/repos/" ++ params.repo ++ "/git/trees"
+        , body =
+            Http.jsonBody
+                (Json.Encode.object
+                    [ ( "base_tree", Json.Encode.string params.baseTree )
+                    , ( "tree"
+                      , Json.Encode.list encodeTree
+                            [ params.tree
+                            ]
+                      )
+                    ]
+                )
+        , resolver = jsonResolver decoder
+        , timeout = Nothing
+        }
+
+
+{-| See <https://docs.github.com/en/rest/reference/git#update-a-reference>
+
+NOTE: Not all output fields are supported yet. Pull requests adding more complete support are welcome.
+
+-}
+updateRef :
+    { authToken : String
+    , repo : String
+    , ref : String
+    , sha : String
+    , force : Bool
+    }
+    -> Task Http.Error Ref
+updateRef params =
+    Http.task
+        { method = "PATCH"
+        , headers = [ Http.header "Authorization" ("token " ++ params.authToken) ]
+        , url = "https://api.github.com/repos/" ++ params.repo ++ "/git/refs/" ++ params.ref
+        , body =
+            Http.jsonBody
+                (Json.Encode.object
+                    [ ( "sha", Json.Encode.string params.sha )
+                    , ( "force", Json.Encode.bool params.force )
+                    ]
+                )
+        , resolver = jsonResolver decodeRef
+        , timeout = Nothing
+        }
+
+
+{-| A convenience function for calling [`updateRef`](#updateRef) with the ref `heads/{branch}`
+-}
+updateHeadRef :
+    { authToken : String
+    , repo : String
+    , branch : String
+    , sha : String
+    , force : Bool
+    }
+    -> Task Http.Error Ref
+updateHeadRef params =
+    updateRef
+        { authToken = params.authToken
+        , repo = params.repo
+        , ref = "heads/" ++ params.branch
+        , sha = params.sha
+        , force = params.force
+        }
+
+
+{-| A convenience function for calling [`updateRef`](#updateRef) with the ref `tags/{tag}`
+-}
+updateTagRef :
+    { authToken : String
+    , repo : String
+    , tag : String
+    , sha : String
+    , force : Bool
+    }
+    -> Task Http.Error Ref
+updateTagRef params =
+    updateRef
+        { authToken = params.authToken
+        , repo = params.repo
+        , ref = "tags/" ++ params.tag
+        , sha = params.sha
+        , force = params.force
         }
