@@ -37,7 +37,7 @@ import Task exposing (Task)
 import Time
 
 
-{-| See <https://developer.github.com/v3/git/commits/#get-a-commit>
+{-| See <https://docs.github.com/en/rest/reference/git#get-a-commit>
 
 NOTE: Not all input options and output fields are supported yet. Pull requests adding more complete support are welcome.
 
@@ -52,19 +52,24 @@ getCommit :
             { sha : String
             , tree :
                 { sha : String
+                , url : String
                 }
             }
 getCommit params =
     let
         decoder =
-            Json.Decode.map2
-                (\sha treeSha ->
+            Json.Decode.map3
+                (\sha treeSha treeUrl ->
                     { sha = sha
-                    , tree = { sha = treeSha }
+                    , tree =
+                        { sha = treeSha
+                        , url = treeUrl
+                        }
                     }
                 )
                 (Json.Decode.at [ "sha" ] Json.Decode.string)
                 (Json.Decode.at [ "tree", "sha" ] Json.Decode.string)
+                (Json.Decode.at [ "tree", "url" ] Json.Decode.string)
     in
     Http.task
         { method = "GET"
@@ -666,42 +671,6 @@ getTagRef params =
     getRef
         { repo = params.repo
         , ref = "tags/" ++ params.tag
-        }
-
-
-getCommitInfo :
-    { a
-        | owner : String
-        , repo : String
-        , sha : String
-    }
-    ->
-        Task Http.Error
-            { tree_sha : String
-            , tree_url : String
-            , commit_sha : String
-            }
-getCommitInfo params =
-    let
-        decoder =
-            Json.Decode.map3
-                (\tree_sha tree_url commit_sha ->
-                    { tree_sha = tree_sha
-                    , tree_url = tree_url
-                    , commit_sha = commit_sha
-                    }
-                )
-                (Json.Decode.at [ "tree", "sha" ] Json.Decode.string)
-                (Json.Decode.at [ "tree", "url" ] Json.Decode.string)
-                (Json.Decode.at [ "sha" ] Json.Decode.string)
-    in
-    Http.task
-        { method = "GET"
-        , headers = []
-        , url = "https://api.github.com/repos/" ++ params.owner ++ "/" ++ params.repo ++ "/git/commits/" ++ params.sha
-        , body = Http.emptyBody
-        , resolver = jsonResolver decoder
-        , timeout = Nothing
         }
 
 
