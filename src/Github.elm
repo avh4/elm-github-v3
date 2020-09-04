@@ -3,6 +3,7 @@ module Github exposing
     , getCommit, createCommit
     , PullRequest, getPullRequests, getPullRequest, createPullRequest
     , getFileContents, updateFileContents
+    , createBlob, getBlobAsBase64
     , getComments, createComment
     )
 
@@ -12,6 +13,7 @@ module Github exposing
 @docs getCommit, createCommit
 @docs PullRequest, getPullRequests, getPullRequest, createPullRequest
 @docs getFileContents, updateFileContents
+@docs createBlob, getBlobAsBase64
 
 
 ## Issues
@@ -503,3 +505,79 @@ jsonResolver decoder =
 
                 Http.BadStatus_ metadata _ ->
                     Err (Http.BadStatus metadata.statusCode)
+
+
+{-| See <https://docs.github.com/en/rest/reference/git#get-a-blob>
+
+This function returns the blob content as a base64-encoded string.
+
+NOTE: Not all output fields are supported yet. Pull requests adding more complete support are welcome.
+
+-}
+getBlobAsBase64 :
+    { repo : String
+    , fileSha : String
+    }
+    ->
+        Task Http.Error
+            { content : String
+            }
+getBlobAsBase64 params =
+    let
+        decoder =
+            Json.Decode.map
+                (\content ->
+                    { content = content
+                    }
+                )
+                (Json.Decode.at [ "content" ] Json.Decode.string)
+    in
+    Http.task
+        { method = "GET"
+        , headers =
+            [ Http.header "Accept" "application/vnd.github.v3+json"
+            ]
+        , url = "https://api.github.com/repos/" ++ params.repo ++ "/git/blobs" ++ "/" ++ params.fileSha
+        , body = Http.emptyBody
+        , resolver = jsonResolver decoder
+        , timeout = Nothing
+        }
+
+
+{-| See <https://docs.github.com/en/rest/reference/git#create-a-blob>
+
+NOTE: Not all output fields are supported yet. Pull requests adding more complete support are welcome.
+
+-}
+createBlob :
+    { authToken : String
+    , repo : String
+    , content : String
+    }
+    ->
+        Task Http.Error
+            { sha : String
+            }
+createBlob params =
+    let
+        decoder =
+            Json.Decode.at [ "sha" ] Json.Decode.string
+                |> Json.Decode.map (\sha -> { sha = sha })
+    in
+    Http.task
+        { method = "POST"
+        , headers =
+            [ Http.header "Authorization" ("token " ++ params.authToken)
+            , Http.header "Accept" "application/vnd.github.v3+json"
+            ]
+        , url = "https://api.github.com/repos/" ++ params.repo ++ "/git/blobs"
+        , body =
+            Http.jsonBody
+                (Json.Encode.object
+                    [ ( "content", Json.Encode.string params.content )
+                    , ( "encoding", Json.Encode.string "utf-8" )
+                    ]
+                )
+        , resolver = jsonResolver decoder
+        , timeout = Nothing
+        }
