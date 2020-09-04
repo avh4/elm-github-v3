@@ -597,24 +597,35 @@ createBlob params =
         }
 
 
-getHeadRef :
-    { a
-        | owner : String
-        , repo : String
-        , branch : String
+{-| See [`getRef`](#getRef)
+-}
+type alias GetRefResponse =
+    { object :
+        { sha : String
+        , url : String
+        }
     }
-    ->
-        Task Http.Error
-            { sha : String
-            , url : String
-            }
-getHeadRef params =
+
+
+{-| See <https://docs.github.com/en/rest/reference/git#get-a-reference>
+
+NOTE: Not all output fields are supported yet. Pull requests adding more complete support are welcome.
+
+-}
+getRef :
+    { repo : String
+    , ref : String
+    }
+    -> Task Http.Error GetRefResponse
+getRef params =
     let
         decoder =
             Json.Decode.map2
                 (\sha url ->
-                    { sha = sha
-                    , url = url
+                    { object =
+                        { sha = sha
+                        , url = url
+                        }
                     }
                 )
                 (Json.Decode.at [ "object", "sha" ] Json.Decode.string)
@@ -623,10 +634,38 @@ getHeadRef params =
     Http.task
         { method = "GET"
         , headers = []
-        , url = "https://api.github.com/repos/" ++ params.owner ++ "/" ++ params.repo ++ "/git/refs/heads/" ++ params.branch
+        , url = "https://api.github.com/repos/" ++ params.repo ++ "/git/refs/" ++ params.ref
         , body = Http.emptyBody
         , resolver = jsonResolver decoder
         , timeout = Nothing
+        }
+
+
+{-| A convenience function for calling [`getRef`](#getRef) with the ref `heads/{branch}`
+-}
+getHeadRef :
+    { repo : String
+    , branch : String
+    }
+    -> Task Http.Error GetRefResponse
+getHeadRef params =
+    getRef
+        { repo = params.repo
+        , ref = "heads/" ++ params.branch
+        }
+
+
+{-| A convenience function for calling [`getRef`](#getRef) with the ref `tags/{tag}`
+-}
+getTagRef :
+    { repo : String
+    , tag : String
+    }
+    -> Task Http.Error GetRefResponse
+getTagRef params =
+    getRef
+        { repo = params.repo
+        , ref = "tags/" ++ params.tag
         }
 
 
