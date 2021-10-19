@@ -1,107 +1,220 @@
 module Github exposing
-    ( getBranch, createBranch
-    , getCommit, createCommit
-    , PullRequest, getPullRequests, getPullRequest, createPullRequest
-    , getFileContents, updateFileContents
-    , createBlob, getBlobAsBase64
-    , getComments, createComment
+    ( OAuthToken, oauthToken, oauthTokenToString, AccessTokenResponse, oauthLink, OAuthCode, oauthCode, oauthCodeToString, ClientId, clientId, clientIdToString, ClientSecret, clientSecret, clientSecretToString, getAccessToken, Scope(..), scopeFromString, scopeToString
+    , getRepository, getContents, Owner, owner, ownerToString, updateFileContents
+    , Branch, branch, branchToString, getBranches, getBranch, updateBranch, listTags, createBranch, getBranchZip, getTag, getCommit, createCommit, getCommitZip, sha, shaToString, ShaHash, CommitSha, TreeSha, Content(..), ContentType(..), DirectoryEntry, createTree
+    , PullRequest, getPullRequests, getPullRequest, createPullRequest, createFork
+    , getComments, createComment, createIssue
     )
 
 {-|
 
-@docs getBranch, createBranch
-@docs getCommit, createCommit
-@docs PullRequest, getPullRequests, getPullRequest, createPullRequest
-@docs getFileContents, updateFileContents
-@docs createBlob, getBlobAsBase64
+
+## Authorization
+
+@docs OAuthToken, oauthToken, oauthTokenToString, AccessTokenResponse, oauthLink, OAuthCode, oauthCode, oauthCodeToString, ClientId, clientId, clientIdToString, ClientSecret, clientSecret, clientSecretToString, getAccessToken, Scope, scopeFromString, scopeToString
+
+
+## Get repository
+
+@docs getRepository, getContents, Owner, owner, ownerToString, updateFileContents
+
+
+## Work with git
+
+@docs Branch, branch, branchToString, getBranches, getBranch, updateBranch, listTags, createBranch, getBranchZip, getTag, getCommit, createCommit, getCommitZip, sha, shaToString, ShaHash, CommitSha, TreeSha, Content, ContentType, DirectoryEntry, createTree
+
+
+## Pull request
+
+@docs PullRequest, getPullRequests, getPullRequest, createPullRequest, createFork
 
 
 ## Issues
 
-@docs getComments, createComment
+@docs getComments, createComment, createIssue
 
 -}
 
 import Base64
+import Bytes exposing (Bytes)
+import Dict
 import Http
 import Iso8601
 import Json.Decode
 import Json.Encode
+import List.Nonempty exposing (Nonempty)
+import String.Nonempty exposing (NonemptyString)
 import Task exposing (Task)
 import Time
+import Url exposing (Url)
+import Url.Builder
 
 
-{-| See <https://developer.github.com/v3/git/commits/#get-a-commit>
+{-| See <https://docs.github.com/en/rest/reference/repos#get-a-repository>
 
 NOTE: Not all input options and output fields are supported yet. Pull requests adding more complete support are welcome.
 
 -}
-getCommit :
-    { authToken : String
+getRepository :
+    { authToken : OAuthToken
+    , owner : Owner
     , repo : String
-    , sha : String
     }
-    ->
-        Task Http.Error
-            { sha : String
-            , tree :
-                { sha : String
-                }
-            }
-getCommit params =
+    -> Task Http.Error { defaultBranch : Branch }
+getRepository params =
     let
         decoder =
-            Json.Decode.map2
-                (\sha treeSha ->
-                    { sha = sha
-                    , tree = { sha = treeSha }
-                    }
-                )
-                (Json.Decode.at [ "sha" ] Json.Decode.string)
-                (Json.Decode.at [ "tree", "sha" ] Json.Decode.string)
+            Json.Decode.map (\defaultBranch -> { defaultBranch = defaultBranch })
+                (Json.Decode.field "default_branch" decodeBranch)
     in
     Http.task
         { method = "GET"
-        , headers = [ Http.header "Authorization" ("token " ++ params.authToken) ]
-        , url = "https://api.github.com/repos/" ++ params.repo ++ "/git/commits/" ++ params.sha
+        , headers = [ authorizationHeader params.authToken ]
+        , url = "https://api.github.com/repos/" ++ ownerToString params.owner ++ "/" ++ params.repo
         , body = Http.emptyBody
         , resolver = jsonResolver decoder
         , timeout = Nothing
         }
 
 
-{-| See <https://developer.github.com/v3/git/commits/#create-a-commit>
+{-| Get all branches for a git repo.
+-}
+getBranches :
+    { authToken : OAuthToken
+    , owner : Owner
+    , repo : String
+    }
+    -> Task Http.Error (List { name : String, sha : ShaHash CommitSha })
+getBranches params =
+    let
+        decoder =
+            Json.Decode.map2 (\name sha_ -> { name = name, sha = sha_ })
+                (Json.Decode.field "name" Json.Decode.string)
+                (Json.Decode.at [ "commit", "sha" ] decodeSha)
+    in
+    Http.task
+        { method = "GET"
+        , headers = [ authorizationHeader params.authToken ]
+        , url =
+            Url.Builder.crossOrigin githubApiDomain
+                [ "repos", ownerToString params.owner, params.repo, "branches" ]
+                []
+        , body = Http.emptyBody
+        , resolver = jsonResolver (Json.Decode.list decoder)
+        , timeout = Nothing
+        }
+
+
+{-| authToken is Maybe here because it seems like there can be problems request a zip from a public repo if you provide authentication.
+-}
+getBranchZip :
+    { authToken : Maybe OAuthToken
+    , owner : Owner
+    , repo : String
+    , branchName : Maybe Branch
+    }
+    -> Task Http.Error Bytes
+getBranchZip params =
+    Http.task
+        { method = "GET"
+        , headers =
+            case params.authToken of
+                Just authToken ->
+                    [ authorizationHeader authToken ]
+
+                Nothing ->
+                    []
+        , url =
+            Url.Builder.crossOrigin githubApiDomain
+                ("repos"
+                    :: ownerToString params.owner
+                    :: params.repo
+                    :: "zipball"
+                    :: (case params.branchName of
+                            Just branchName ->
+                                [ branchToString branchName ]
+
+                            Nothing ->
+                                []
+                       )
+                )
+                []
+        , body = Http.emptyBody
+        , resolver = bytesResolver
+        , timeout = Nothing
+        }
+
+
+{-| -}
+getCommitZip : { authToken : OAuthToken, owner : Owner, repo : String, sha : ShaHash CommitSha } -> Task Http.Error Bytes
+getCommitZip params =
+    Http.task
+        { method = "GET"
+        , headers = [ authorizationHeader params.authToken ]
+        , url = "https://github.com/" ++ ownerToString params.owner ++ "/" ++ params.repo ++ "/archive/" ++ shaToString params.sha ++ ".zip"
+        , body = Http.emptyBody
+        , resolver = bytesResolver
+        , timeout = Nothing
+        }
+
+
+{-| See <https://docs.github.com/en/rest/reference/git#get-a-commit>
+
+NOTE: Not all input options and output fields are supported yet. Pull requests adding more complete support are welcome.
+
+-}
+getCommit :
+    { authToken : OAuthToken
+    , owner : Owner
+    , repo : String
+    , sha : ShaHash CommitSha
+    }
+    -> Task Http.Error (ShaHash TreeSha)
+getCommit params =
+    let
+        decoder =
+            Json.Decode.at [ "tree", "sha" ] decodeSha
+    in
+    Http.task
+        { method = "GET"
+        , headers = [ authorizationHeader params.authToken ]
+        , url = "https://api.github.com/repos/" ++ ownerToString params.owner ++ "/" ++ params.repo ++ "/git/commits/" ++ shaToString params.sha
+        , body = Http.emptyBody
+        , resolver = jsonResolver decoder
+        , timeout = Nothing
+        }
+
+
+{-| See <https://docs.github.com/en/rest/reference/git#create-a-commit>
 
 NOTE: Not all input options and output fields are supported yet. Pull requests adding more complete support are welcome.
 
 -}
 createCommit :
-    { authToken : String
+    { authToken : OAuthToken
+    , owner : Owner
     , repo : String
     , message : String
-    , tree : String
-    , parents : List String
+    , tree : ShaHash TreeSha
+    , parents : List (ShaHash CommitSha)
     }
-    ->
-        Task Http.Error
-            { sha : String
-            }
+    -> Task Http.Error (ShaHash CommitSha)
 createCommit params =
     let
         decoder =
-            Json.Decode.at [ "sha" ] Json.Decode.string
-                |> Json.Decode.map (\sha -> { sha = sha })
+            Json.Decode.field "sha" Json.Decode.string
+                |> Json.Decode.map sha
     in
     Http.task
         { method = "POST"
-        , headers = [ Http.header "Authorization" ("token " ++ params.authToken) ]
-        , url = "https://api.github.com/repos/" ++ params.repo ++ "/git/commits"
+        , headers = [ authorizationHeader params.authToken ]
+        , url = "https://api.github.com/repos/" ++ ownerToString params.owner ++ "/" ++ params.repo ++ "/git/commits"
         , body =
             Http.jsonBody
                 (Json.Encode.object
                     [ ( "message", Json.Encode.string params.message )
-                    , ( "tree", Json.Encode.string params.tree )
-                    , ( "parents", Json.Encode.list Json.Encode.string params.parents )
+                    , ( "tree", encodeSha params.tree )
+                    , ( "parents", Json.Encode.list encodeSha params.parents )
                     ]
                 )
         , resolver = jsonResolver decoder
@@ -109,34 +222,176 @@ createCommit params =
         }
 
 
-{-| See <https://developer.github.com/v3/git/refs/#get-a-reference>
+{-| See <https://docs.github.com/en/rest/reference/git#get-a-reference>
 
 NOTE: Not all input options and output fields are supported yet. Pull requests adding more complete support are welcome.
 
 -}
 getBranch :
-    { authToken : String
+    { authToken : OAuthToken
+    , owner : Owner
     , repo : String
-    , branchName : String
+    , branchName : Branch
     }
-    ->
-        Task Http.Error
-            { object :
-                { sha : String
-                }
-            }
+    -> Task Http.Error (ShaHash CommitSha)
 getBranch params =
     let
         decoder =
-            Json.Decode.at [ "object", "sha" ] Json.Decode.string
-                |> Json.Decode.map (\sha -> { object = { sha = sha } })
+            Json.Decode.at [ "object", "sha" ] decodeSha
     in
     Http.task
         { method = "GET"
-        , headers = [ Http.header "Authorization" ("token " ++ params.authToken) ]
-        , url = "https://api.github.com/repos/" ++ params.repo ++ "/git/refs/heads/" ++ params.branchName
+        , headers = [ authorizationHeader params.authToken ]
+        , url = "https://api.github.com/repos/" ++ ownerToString params.owner ++ "/" ++ params.repo ++ "/git/refs/heads/" ++ branchToString params.branchName
         , body = Http.emptyBody
         , resolver = jsonResolver decoder
+        , timeout = Nothing
+        }
+
+
+{-| See <https://docs.github.com/en/rest/reference/git#update-a-reference>
+
+NOTE: Not all input options and output fields are supported yet. Pull requests adding more complete support are welcome.
+
+-}
+updateBranch :
+    { authToken : OAuthToken
+    , owner : Owner
+    , repo : String
+    , branchName : Branch
+    , sha : ShaHash CommitSha
+    , force : Bool
+    }
+    -> Task Http.Error (ShaHash CommitSha)
+updateBranch params =
+    Http.task
+        { method = "PATCH"
+        , headers = [ authorizationHeader params.authToken ]
+        , url = "https://api.github.com/repos/" ++ ownerToString params.owner ++ "/" ++ params.repo ++ "/git/refs/heads/" ++ branchToString params.branchName
+        , body =
+            Http.jsonBody
+                (Json.Encode.object
+                    [ ( "sha", Json.Encode.string (shaToString params.sha) ), ( "force", Json.Encode.bool params.force ) ]
+                )
+        , resolver = jsonResolver referenceDecoder
+        , timeout = Nothing
+        }
+
+
+{-| See <https://docs.github.com/en/rest/reference/git#get-a-reference>
+
+NOTE: Not all input options and output fields are supported yet. Pull requests adding more complete support are welcome.
+
+-}
+getTag :
+    { authToken : OAuthToken
+    , owner : Owner
+    , repo : String
+    , tagName : String
+    }
+    -> Task Http.Error (ShaHash CommitSha)
+getTag params =
+    let
+        decoder =
+            Json.Decode.at [ "object", "sha" ] decodeSha
+    in
+    Http.task
+        { method = "GET"
+        , headers = [ authorizationHeader params.authToken ]
+        , url = "https://api.github.com/repos/" ++ ownerToString params.owner ++ "/" ++ params.repo ++ "/git/refs/tags/" ++ params.tagName
+        , body = Http.emptyBody
+        , resolver = jsonResolver decoder
+        , timeout = Nothing
+        }
+
+
+{-| See <https://docs.github.com/en/rest/reference/git#create-a-tree>
+
+NOTE: Not all input options and output fields are supported yet. Pull requests adding more complete support are welcome.
+
+-}
+createTree :
+    { authToken : OAuthToken
+    , owner : Owner
+    , repo : String
+    , treeNodes : Nonempty { path : String, content : String }
+    , baseTree : Maybe (ShaHash TreeSha)
+    }
+    -> Task Http.Error { treeSha : ShaHash TreeSha }
+createTree params =
+    let
+        decoder =
+            Json.Decode.field "sha" decodeSha
+                |> Json.Decode.map (\treeSha -> { treeSha = treeSha })
+    in
+    Http.task
+        { method = "POST"
+        , headers = [ authorizationHeader params.authToken ]
+        , url = "https://api.github.com/repos/" ++ ownerToString params.owner ++ "/" ++ params.repo ++ "/git/trees"
+        , body =
+            ( "tree", Json.Encode.list encodeTreeNode (List.Nonempty.toList params.treeNodes) )
+                :: (case params.baseTree of
+                        Just baseTree ->
+                            [ ( "base_tree", encodeSha baseTree ) ]
+
+                        Nothing ->
+                            []
+                   )
+                |> Json.Encode.object
+                |> Http.jsonBody
+        , resolver = jsonResolver decoder
+        , timeout = Nothing
+        }
+
+
+encodeTreeNode : { path : String, content : String } -> Json.Encode.Value
+encodeTreeNode treeNode =
+    ( "path", Json.Encode.string treeNode.path )
+        :: ( "mode", Json.Encode.string "100644" )
+        :: ( "type", Json.Encode.string "blob" )
+        :: ( "content", Json.Encode.string treeNode.content )
+        :: []
+        |> Json.Encode.object
+
+
+referenceDecoder =
+    Json.Decode.at [ "object", "sha" ] Json.Decode.string
+        |> Json.Decode.map sha
+
+
+type alias Tag =
+    { name : String
+    , commitSha : ShaHash CommitSha
+    , nodeId : String
+    }
+
+
+decodeTag : Json.Decode.Decoder Tag
+decodeTag =
+    Json.Decode.map3 Tag
+        (Json.Decode.field "name" Json.Decode.string)
+        (Json.Decode.at [ "commit", "sha" ] decodeSha)
+        (Json.Decode.field "node_id" Json.Decode.string)
+
+
+{-| See <https://docs.github.com/en/rest/reference/repos#list-repository-tags>
+
+NOTE: Not all input options and output fields are supported yet. Pull requests adding more complete support are welcome.
+
+-}
+listTags :
+    { authToken : OAuthToken
+    , owner : Owner
+    , repo : String
+    }
+    -> Task Http.Error (List Tag)
+listTags params =
+    Http.task
+        { method = "GET"
+        , headers = [ authorizationHeader params.authToken ]
+        , url = "https://api.github.com/repos/" ++ ownerToString params.owner ++ "/" ++ params.repo ++ "/tags"
+        , body = Http.emptyBody
+        , resolver = jsonResolver (Json.Decode.list decodeTag)
         , timeout = Nothing
         }
 
@@ -147,10 +402,11 @@ NOTE: Not all input options and output fields are supported yet. Pull requests a
 
 -}
 createBranch :
-    { authToken : String
+    { authToken : OAuthToken
+    , owner : Owner
     , repo : String
-    , branchName : String
-    , sha : String
+    , branchName : Branch
+    , sha : ShaHash CommitSha
     }
     -> Task Http.Error ()
 createBranch params =
@@ -160,13 +416,17 @@ createBranch params =
     in
     Http.task
         { method = "POST"
-        , headers = [ Http.header "Authorization" ("token " ++ params.authToken) ]
-        , url = "https://api.github.com/repos/" ++ params.repo ++ "/git/refs"
+        , headers = [ authorizationHeader params.authToken ]
+        , url =
+            Url.Builder.crossOrigin
+                githubApiDomain
+                [ "repos", ownerToString params.owner, params.repo, "git", "refs" ]
+                []
         , body =
             Http.jsonBody
                 (Json.Encode.object
-                    [ ( "ref", Json.Encode.string ("refs/heads/" ++ params.branchName) )
-                    , ( "sha", Json.Encode.string params.sha )
+                    [ ( "ref", Json.Encode.string ("refs/heads/" ++ branchToString params.branchName) )
+                    , ( "sha", encodeSha params.sha )
                     ]
                 )
         , resolver = jsonResolver decoder
@@ -195,14 +455,14 @@ NOTE: Not all input options and output fields are supported yet. Pull requests a
 
 -}
 getPullRequests :
-    { authToken : String
+    { authToken : OAuthToken
     , repo : String
     }
     -> Task Http.Error (List PullRequest)
 getPullRequests params =
     Http.task
         { method = "GET"
-        , headers = [ Http.header "Authorization" ("token " ++ params.authToken) ]
+        , headers = [ authorizationHeader params.authToken ]
         , url = "https://api.github.com/repos/" ++ params.repo ++ "/pulls"
         , body = Http.emptyBody
         , resolver = jsonResolver (Json.Decode.list decodePullRequest)
@@ -216,17 +476,14 @@ NOTE: Not all input options and output fields are supported yet. Pull requests a
 
 -}
 getPullRequest :
-    { authToken : String
+    { authToken : OAuthToken
     , repo : String
     , number : Int
     }
     ->
-        Task Http.Error
-            { head :
-                { ref : String
-                , sha : String
-                }
-            }
+        Task
+            Http.Error
+            { head : { ref : String, sha : ShaHash CommitSha } }
 getPullRequest params =
     let
         decoder =
@@ -234,7 +491,7 @@ getPullRequest params =
                 (\headRef headSha ->
                     { head =
                         { ref = headRef
-                        , sha = headSha
+                        , sha = sha headSha
                         }
                     }
                 )
@@ -243,7 +500,7 @@ getPullRequest params =
     in
     Http.task
         { method = "GET"
-        , headers = [ Http.header "Authorization" ("token " ++ params.authToken) ]
+        , headers = [ authorizationHeader params.authToken ]
         , url = "https://api.github.com/repos/" ++ params.repo ++ "/pulls/" ++ String.fromInt params.number
         , body = Http.emptyBody
         , resolver = jsonResolver decoder
@@ -257,29 +514,42 @@ NOTE: Not all input options and output fields are supported yet. Pull requests a
 
 -}
 createPullRequest :
-    { authToken : String
-    , repo : String
-    , branchName : String
-    , baseBranch : String
+    { authToken : OAuthToken
+    , destinationOwner : Owner
+    , destinationRepo : String
+    , destinationBranch : Branch
+    , sourceBranchOwner : Owner
+    , sourceBranch : Branch
     , title : String
     , description : String
     }
-    -> Task Http.Error ()
+    -> Task Http.Error { apiUrl : String, htmlUrl : String }
 createPullRequest params =
     let
         decoder =
-            Json.Decode.succeed ()
+            Json.Decode.map2 (\url htmlUrl -> { apiUrl = url, htmlUrl = htmlUrl })
+                (Json.Decode.field "url" Json.Decode.string)
+                (Json.Decode.field "html_url" Json.Decode.string)
     in
     Http.task
         { method = "POST"
-        , headers = [ Http.header "Authorization" ("token " ++ params.authToken) ]
-        , url = "https://api.github.com/repos/" ++ params.repo ++ "/pulls"
+        , headers = [ authorizationHeader params.authToken ]
+        , url = "https://api.github.com/repos/" ++ ownerToString params.destinationOwner ++ "/" ++ params.destinationRepo ++ "/pulls"
         , body =
             Http.jsonBody
                 (Json.Encode.object
                     [ ( "title", Json.Encode.string params.title )
-                    , ( "head", Json.Encode.string params.branchName )
-                    , ( "base", Json.Encode.string params.baseBranch )
+                    , ( "base", encodeBranch params.destinationBranch )
+                    , ( "head"
+                      , if params.destinationOwner == params.sourceBranchOwner then
+                            encodeBranch params.sourceBranch
+
+                        else
+                            ownerToString params.sourceBranchOwner
+                                ++ ":"
+                                ++ branchToString params.sourceBranch
+                                |> Json.Encode.string
+                      )
                     , ( "body", Json.Encode.string params.description )
                     ]
                 )
@@ -288,41 +558,161 @@ createPullRequest params =
         }
 
 
-{-| See <https://developer.github.com/v3/repos/contents/#get-contents>
+{-| -}
+type ContentType
+    = FileContentType
+    | DirectoryContentType
+    | SymLinkType
+    | SubmoduleType
+
+
+{-| -}
+type Content
+    = FileContent
+        { encoding : String
+        , content : String
+        , sha : ShaHash CommitSha
+        , downloadUrl : Url
+        , url : Url
+        }
+    | DirectoryContent (List DirectoryEntry)
+    | Symlink
+    | Submodule
+
+
+{-| A file directory in a git repo.
+-}
+type alias DirectoryEntry =
+    { contentType : ContentType
+    , name : String
+    , path : String
+    , sha : ShaHash CommitSha
+    , downloadUrl : Maybe Url
+    , url : Maybe Url
+    }
+
+
+decodeFile =
+    Json.Decode.map5
+        (\encoding content sha_ downloadUrl url ->
+            { encoding = encoding
+            , content = content
+            , sha = sha_
+            , downloadUrl = downloadUrl
+            , url = url
+            }
+        )
+        (Json.Decode.field "encoding" Json.Decode.string)
+        (Json.Decode.field "content" Json.Decode.string)
+        (Json.Decode.field "sha" decodeSha)
+        (Json.Decode.field "download_url" decodeUrl)
+        (Json.Decode.field "url" decodeUrl)
+
+
+decodeContentType : Json.Decode.Decoder ContentType
+decodeContentType =
+    Json.Decode.string
+        |> Json.Decode.andThen
+            (\text ->
+                case text of
+                    "file" ->
+                        Json.Decode.succeed FileContentType
+
+                    "dir" ->
+                        Json.Decode.succeed DirectoryContentType
+
+                    "symlink" ->
+                        Json.Decode.succeed SymLinkType
+
+                    "submodule" ->
+                        Json.Decode.succeed SubmoduleType
+
+                    _ ->
+                        Json.Decode.fail ("Invalid content type: " ++ text)
+            )
+
+
+decodeUrl : Json.Decode.Decoder Url
+decodeUrl =
+    Json.Decode.string
+        |> Json.Decode.andThen
+            (\text ->
+                case Url.fromString text of
+                    Just url ->
+                        Json.Decode.succeed url
+
+                    Nothing ->
+                        Json.Decode.fail ("Invalid url: " ++ text)
+            )
+
+
+decodeDirectoryEntry : Json.Decode.Decoder DirectoryEntry
+decodeDirectoryEntry =
+    Json.Decode.map6 DirectoryEntry
+        (Json.Decode.field "type" decodeContentType)
+        (Json.Decode.field "name" Json.Decode.string)
+        (Json.Decode.field "path" Json.Decode.string)
+        (Json.Decode.field "sha" decodeSha)
+        (Json.Decode.field "download_url" (Json.Decode.nullable decodeUrl))
+        (Json.Decode.field "url" (Json.Decode.nullable decodeUrl))
+
+
+{-| See <https://docs.github.com/en/rest/reference/repos#contents>
 
 NOTE: Not all input options and output fields are supported yet. Pull requests adding more complete support are welcome.
 
 -}
-getFileContents :
-    { authToken : String
+getContents :
+    { authToken : OAuthToken
+    , owner : Owner
     , repo : String
-    , ref : String
+    , ref : Maybe String
     , path : String
     }
-    ->
-        Task Http.Error
-            { encoding : String
-            , content : String
-            , sha : String
-            }
-getFileContents params =
+    -> Task Http.Error Content
+getContents params =
     let
         decoder =
-            Json.Decode.map3
-                (\encoding content sha ->
-                    { encoding = encoding
-                    , content = content
-                    , sha = sha
-                    }
-                )
-                (Json.Decode.at [ "encoding" ] Json.Decode.string)
-                (Json.Decode.at [ "content" ] Json.Decode.string)
-                (Json.Decode.at [ "sha" ] Json.Decode.string)
+            Json.Decode.oneOf
+                [ Json.Decode.field "type" decodeContentType
+                    |> Json.Decode.andThen
+                        (\contentType ->
+                            case contentType of
+                                FileContentType ->
+                                    Json.Decode.map FileContent decodeFile
+
+                                DirectoryContentType ->
+                                    Json.Decode.map (List.singleton >> DirectoryContent) decodeDirectoryEntry
+
+                                SymLinkType ->
+                                    Json.Decode.succeed Symlink
+
+                                SubmoduleType ->
+                                    Json.Decode.succeed Submodule
+                        )
+                , Json.Decode.list decodeDirectoryEntry |> Json.Decode.map DirectoryContent
+                ]
     in
     Http.task
         { method = "GET"
-        , headers = [ Http.header "Authorization" ("token " ++ params.authToken) ]
-        , url = "https://api.github.com/repos/" ++ params.repo ++ "/contents/" ++ params.path ++ "?ref=" ++ params.ref
+        , headers = [ authorizationHeader params.authToken ]
+        , url =
+            Url.Builder.crossOrigin githubApiDomain
+                [ "repos"
+                , ownerToString params.owner
+                , params.repo
+                , "contents"
+                , params.path
+                ]
+                (case params.ref of
+                    Just ref ->
+                        [ Url.Builder.string "ref" ref ]
+
+                    Nothing ->
+                        []
+                )
+
+        --"https://api.github.com/repos/" ++ params.repo ++ "/contents/" ++ params.path ++ "?ref=" ++ params.ref
         , body = Http.emptyBody
         , resolver = jsonResolver decoder
         , timeout = Nothing
@@ -335,18 +725,19 @@ NOTE: Not all input options and output fields are supported yet. Pull requests a
 
 -}
 updateFileContents :
-    { authToken : String
+    { authToken : OAuthToken
     , repo : String
-    , branch : String
+    , branch : Branch
     , path : String
-    , sha : String
+    , sha : ShaHash a
     , message : String
     , content : String
     }
     ->
-        Task Http.Error
+        Task
+            Http.Error
             { content :
-                { sha : String
+                { sha : ShaHash a
                 }
             }
 updateFileContents params =
@@ -356,19 +747,19 @@ updateFileContents params =
                 (\contentSha ->
                     { content = { sha = contentSha } }
                 )
-                (Json.Decode.at [ "content", "sha" ] Json.Decode.string)
+                (Json.Decode.at [ "content", "sha" ] decodeSha)
     in
     Http.task
         { method = "PUT"
-        , headers = [ Http.header "Authorization" ("token " ++ params.authToken) ]
+        , headers = [ authorizationHeader params.authToken ]
         , url = "https://api.github.com/repos/" ++ params.repo ++ "/contents/" ++ params.path
         , body =
             Http.jsonBody
                 (Json.Encode.object
                     [ ( "message", Json.Encode.string params.message )
                     , ( "content", Json.Encode.string (Base64.encode params.content) )
-                    , ( "sha", Json.Encode.string params.sha )
-                    , ( "branch", Json.Encode.string params.branch )
+                    , ( "sha", encodeSha params.sha )
+                    , ( "branch", encodeBranch params.branch )
                     ]
                 )
         , resolver = jsonResolver decoder
@@ -382,12 +773,13 @@ NOTE: Not all input options and output fields are supported yet. Pull requests a
 
 -}
 getComments :
-    { authToken : String
+    { authToken : OAuthToken
     , repo : String
     , issueNumber : Int
     }
     ->
-        Task Http.Error
+        Task
+            Http.Error
             (List
                 { body : String
                 , user :
@@ -420,7 +812,7 @@ getComments params =
     in
     Http.task
         { method = "GET"
-        , headers = [ Http.header "Authorization" ("token " ++ params.authToken) ]
+        , headers = [ authorizationHeader params.authToken ]
         , url = "https://api.github.com/repos/" ++ params.repo ++ "/issues/" ++ String.fromInt params.issueNumber ++ "/comments"
         , body = Http.emptyBody
         , resolver = jsonResolver (Json.Decode.list decoder)
@@ -434,13 +826,14 @@ NOTE: Not all input options and output fields are supported yet. Pull requests a
 
 -}
 createComment :
-    { authToken : String
+    { authToken : OAuthToken
     , repo : String
     , issueNumber : Int
     , body : String
     }
     ->
-        Task Http.Error
+        Task
+            Http.Error
             { body : String
             , user :
                 { login : String
@@ -471,7 +864,7 @@ createComment params =
     in
     Http.task
         { method = "POST"
-        , headers = [ Http.header "Authorization" ("token " ++ params.authToken) ]
+        , headers = [ authorizationHeader params.authToken ]
         , url = "https://api.github.com/repos/" ++ params.repo ++ "/issues/" ++ String.fromInt params.issueNumber ++ "/comments"
         , body =
             Http.jsonBody
@@ -482,6 +875,154 @@ createComment params =
         , resolver = jsonResolver decoder
         , timeout = Nothing
         }
+
+
+{-| The the name of owner of a repo, ("avh4" for example)
+-}
+type Owner
+    = Owner String
+
+
+{-| -}
+owner : String -> Owner
+owner =
+    Owner
+
+
+{-| -}
+ownerToString : Owner -> String
+ownerToString (Owner owner_) =
+    owner_
+
+
+{-| The name of a git branch, i.e. "master", "main", "feature-branch"
+-}
+type Branch
+    = Branch String
+
+
+{-| -}
+branch : String -> Branch
+branch =
+    Branch
+
+
+{-| -}
+branchToString : Branch -> String
+branchToString (Branch branch_) =
+    branch_
+
+
+encodeBranch : Branch -> Json.Encode.Value
+encodeBranch =
+    branchToString >> Json.Encode.string
+
+
+decodeBranch : Json.Decode.Decoder Branch
+decodeBranch =
+    Json.Decode.map branch Json.Decode.string
+
+
+{-| An OAuth token used to authenticate various Github API requests. Not to be confused with `OAuthCode` which is used in order to generate an `OAuthToken`.
+-}
+type OAuthToken
+    = OAuthToken String
+
+
+{-| -}
+oauthToken : String -> OAuthToken
+oauthToken =
+    OAuthToken
+
+
+{-| -}
+oauthTokenToString : OAuthToken -> String
+oauthTokenToString (OAuthToken token) =
+    token
+
+
+{-| A SHA that's used as a pointer for a tree
+-}
+type TreeSha
+    = TreeSha Never
+
+
+{-| A SHA that's used as a pointer for a commit
+-}
+type CommitSha
+    = CommitSha Never
+
+
+{-| A SHA identifier
+-}
+type ShaHash a
+    = ShaHash String
+
+
+{-| -}
+sha : String -> ShaHash a
+sha =
+    ShaHash
+
+
+{-| Get the raw sha string.
+-}
+shaToString : ShaHash a -> String
+shaToString (ShaHash shaHash) =
+    shaHash
+
+
+decodeSha : Json.Decode.Decoder (ShaHash a)
+decodeSha =
+    Json.Decode.string |> Json.Decode.map sha
+
+
+encodeSha : ShaHash a -> Json.Encode.Value
+encodeSha =
+    shaToString >> Json.Encode.string
+
+
+{-| See <https://docs.github.com/en/rest/reference/repos#create-a-fork>
+
+NOTE: Not all input options and output fields are supported yet. Pull requests adding more complete support are welcome.
+
+-}
+createFork :
+    { authToken : OAuthToken
+    , owner : Owner
+    , repo : String
+    }
+    ->
+        Task
+            Http.Error
+            { owner : Owner
+            , repo : String
+            }
+createFork params =
+    let
+        decoder =
+            Json.Decode.map2
+                (\owner_ repo ->
+                    { owner = owner owner_
+                    , repo = repo
+                    }
+                )
+                (Json.Decode.at [ "owner", "login" ] Json.Decode.string)
+                (Json.Decode.at [ "name" ] Json.Decode.string)
+    in
+    Http.task
+        { method = "POST"
+        , headers = [ authorizationHeader params.authToken ]
+        , url = "https://api.github.com/repos/" ++ ownerToString params.owner ++ "/" ++ params.repo ++ "/forks"
+        , body = Http.emptyBody
+        , resolver = jsonResolver decoder
+        , timeout = Nothing
+        }
+
+
+authorizationHeader : OAuthToken -> Http.Header
+authorizationHeader (OAuthToken authToken_) =
+    Http.header "Authorization" ("token " ++ authToken_)
 
 
 jsonResolver : Json.Decode.Decoder a -> Http.Resolver Http.Error a
@@ -507,77 +1048,281 @@ jsonResolver decoder =
                     Err (Http.BadStatus metadata.statusCode)
 
 
-{-| See <https://docs.github.com/en/rest/reference/git#get-a-blob>
+bytesResolver : Http.Resolver Http.Error Bytes
+bytesResolver =
+    Http.bytesResolver <|
+        \response ->
+            case response of
+                Http.GoodStatus_ _ body ->
+                    Ok body
 
-This function returns the blob content as a base64-encoded string.
+                Http.BadUrl_ message ->
+                    Err (Http.BadUrl message)
 
-NOTE: Not all output fields are supported yet. Pull requests adding more complete support are welcome.
+                Http.Timeout_ ->
+                    Err Http.Timeout
 
+                Http.NetworkError_ ->
+                    Err Http.NetworkError
+
+                Http.BadStatus_ metadata _ ->
+                    Err (Http.BadStatus metadata.statusCode)
+
+
+
+---- New stuff ----
+
+
+{-| Github application client id
 -}
-getBlobAsBase64 :
-    { repo : String
-    , fileSha : String
+type ClientId
+    = ClientId String
+
+
+{-| -}
+clientId : String -> ClientId
+clientId =
+    ClientId
+
+
+{-| -}
+clientIdToString : ClientId -> String
+clientIdToString (ClientId a) =
+    a
+
+
+{-| Github application client secret (do not include this on your frontend!)
+-}
+type ClientSecret
+    = ClientSecret String
+
+
+{-| -}
+clientSecret : String -> ClientSecret
+clientSecret =
+    ClientSecret
+
+
+{-| -}
+clientSecretToString : ClientSecret -> String
+clientSecretToString (ClientSecret a) =
+    a
+
+
+{-| Not to be confused with `OAuthToken`! This is an intermediate value you get while generating an `OAuthToken`.
+-}
+type OAuthCode
+    = OAuthCode String
+
+
+{-| -}
+oauthCode : String -> OAuthCode
+oauthCode =
+    OAuthCode
+
+
+{-| -}
+oauthCodeToString : OAuthCode -> String
+oauthCodeToString (OAuthCode a) =
+    a
+
+
+githubDomain : String
+githubDomain =
+    "https://github.com"
+
+
+githubApiDomain : String
+githubApiDomain =
+    "https://api.github.com"
+
+
+{-| See <https://docs.github.com/en/developers/apps/building-oauth-apps/scopes-for-oauth-apps>
+-}
+type Scope
+    = RepoScope
+    | RepoStatusScope
+    | RepoDeploymentScope
+    | PublicRepoScope
+    | RepoInviteScope
+
+
+{-| -}
+scopeToString : Scope -> String
+scopeToString scope =
+    case scope of
+        RepoScope ->
+            "repo"
+
+        RepoStatusScope ->
+            "repo:status"
+
+        RepoDeploymentScope ->
+            "repo_deployment"
+
+        PublicRepoScope ->
+            "public_repo"
+
+        RepoInviteScope ->
+            "repo:invite"
+
+
+{-| -}
+scopeFromString : String -> Maybe Scope
+scopeFromString string =
+    case string of
+        "repo" ->
+            Just RepoScope
+
+        "repo:status" ->
+            Just RepoStatusScope
+
+        "repo_deployment" ->
+            Just RepoDeploymentScope
+
+        "public_repo" ->
+            Just PublicRepoScope
+
+        "repo:invite" ->
+            Just RepoInviteScope
+
+        _ ->
+            Nothing
+
+
+{-| The link a user clicks on to be prompted about authorizing a github app.
+See <https://docs.github.com/en/developers/apps/building-github-apps/identifying-and-authorizing-users-for-github-apps#1-request-a-users-github-identity>
+-}
+oauthLink : { clientId : ClientId, redirectUri : Maybe String, scopes : List Scope, state : Maybe String } -> String
+oauthLink params =
+    Url.Builder.crossOrigin
+        githubDomain
+        [ "login", "oauth", "authorize" ]
+        (Url.Builder.string "client_id" (clientIdToString params.clientId)
+            :: Url.Builder.string
+                "scope"
+                (List.map scopeToString params.scopes |> String.join " ")
+            :: (case params.state of
+                    Just state ->
+                        [ Url.Builder.string "state" state ]
+
+                    Nothing ->
+                        []
+               )
+            ++ (case params.redirectUri of
+                    Just redirectUri ->
+                        [ Url.Builder.string "redirect_uri" redirectUri ]
+
+                    Nothing ->
+                        []
+               )
+        )
+
+
+{-| See <https://docs.github.com/en/developers/apps/building-github-apps/identifying-and-authorizing-users-for-github-apps#2-users-are-redirected-back-to-your-site-by-github>
+-}
+getAccessToken :
+    { clientId : ClientId
+    , clientSecret : ClientSecret
+    , oauthCode : OAuthCode
+    , state : Maybe String
     }
-    ->
-        Task Http.Error
-            { content : String
-            }
-getBlobAsBase64 params =
-    let
-        decoder =
-            Json.Decode.map
-                (\content ->
-                    { content = content
-                    }
-                )
-                (Json.Decode.at [ "content" ] Json.Decode.string)
-    in
+    -> Task Http.Error AccessTokenResponse
+getAccessToken params =
     Http.task
-        { method = "GET"
-        , headers =
-            [ Http.header "Accept" "application/vnd.github.v3+json"
-            ]
-        , url = "https://api.github.com/repos/" ++ params.repo ++ "/git/blobs" ++ "/" ++ params.fileSha
+        { method = "POST"
+        , headers = []
+        , url =
+            Url.Builder.crossOrigin
+                githubDomain
+                [ "login", "oauth", "access_token" ]
+                (Url.Builder.string "client_id" (clientIdToString params.clientId)
+                    :: Url.Builder.string "client_secret" (clientSecretToString params.clientSecret)
+                    :: Url.Builder.string "code" (oauthCodeToString params.oauthCode)
+                    :: (case params.state of
+                            Just state ->
+                                [ Url.Builder.string "state" state ]
+
+                            Nothing ->
+                                []
+                       )
+                )
         , body = Http.emptyBody
-        , resolver = jsonResolver decoder
+        , resolver =
+            Http.stringResolver <|
+                \response ->
+                    case response of
+                        Http.GoodStatus_ _ body ->
+                            let
+                                parameters =
+                                    String.split "&" body
+                                        |> List.filterMap
+                                            (\parameter ->
+                                                case String.split "=" parameter of
+                                                    name :: value :: [] ->
+                                                        Just ( name, value )
+
+                                                    _ ->
+                                                        Nothing
+                                            )
+                                        |> Dict.fromList
+
+                                result =
+                                    Maybe.map3 AccessTokenResponse
+                                        (Dict.get "access_token" parameters |> Maybe.map oauthToken)
+                                        (Dict.get "scope" parameters)
+                                        (Dict.get "token_type" parameters)
+                            in
+                            case result of
+                                Just good ->
+                                    Ok good
+
+                                Nothing ->
+                                    ("Failed to parse parameters from body: " ++ body)
+                                        |> Http.BadBody
+                                        |> Err
+
+                        Http.BadUrl_ message ->
+                            Err (Http.BadUrl message)
+
+                        Http.Timeout_ ->
+                            Err Http.Timeout
+
+                        Http.NetworkError_ ->
+                            Err Http.NetworkError
+
+                        Http.BadStatus_ metadata _ ->
+                            Err (Http.BadStatus metadata.statusCode)
         , timeout = Nothing
         }
 
 
-{-| See <https://docs.github.com/en/rest/reference/git#create-a-blob>
-
-NOTE: Not all output fields are supported yet. Pull requests adding more complete support are welcome.
-
--}
-createBlob :
-    { authToken : String
-    , repo : String
-    , content : String
+{-| -}
+type alias AccessTokenResponse =
+    { accessToken : OAuthToken
+    , scope : String
+    , tokenType : String
     }
-    ->
-        Task Http.Error
-            { sha : String
-            }
-createBlob params =
-    let
-        decoder =
-            Json.Decode.at [ "sha" ] Json.Decode.string
-                |> Json.Decode.map (\sha -> { sha = sha })
-    in
+
+
+{-| See <https://docs.github.com/en/rest/reference/issues#create-an-issue>
+-}
+createIssue : { authToken : OAuthToken, owner : Owner, repo : String, title : NonemptyString, body : String } -> Task Http.Error ()
+createIssue params =
     Http.task
         { method = "POST"
-        , headers =
-            [ Http.header "Authorization" ("token " ++ params.authToken)
-            , Http.header "Accept" "application/vnd.github.v3+json"
-            ]
-        , url = "https://api.github.com/repos/" ++ params.repo ++ "/git/blobs"
+        , headers = [ authorizationHeader params.authToken ]
+        , url =
+            Url.Builder.crossOrigin githubApiDomain
+                [ "repos", ownerToString params.owner, params.repo, "issues" ]
+                []
         , body =
             Http.jsonBody
                 (Json.Encode.object
-                    [ ( "content", Json.Encode.string params.content )
-                    , ( "encoding", Json.Encode.string "utf-8" )
+                    [ ( "title", Json.Encode.string (String.Nonempty.toString params.title) )
+                    , ( "body", Json.Encode.string params.body )
                     ]
                 )
-        , resolver = jsonResolver decoder
+        , resolver = jsonResolver (Json.Decode.succeed ())
         , timeout = Nothing
         }
